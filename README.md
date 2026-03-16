@@ -1,6 +1,6 @@
-# TradeFlow: Derivatives-Risk-Engine
+# Derivatives-Risk-Engine
 
-TradeFlow is a high-performance, real-time quantitative finance engine designed for options pricing, volatility forecasting, and portfolio risk analysis. 
+It is a high-performance, real-time quantitative finance engine designed for options pricing, volatility forecasting, and portfolio risk analysis. 
 
 ## 🚀 Key Achievements & Features
 
