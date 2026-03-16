@@ -14,9 +14,6 @@ warnings.filterwarnings('ignore')
 
 app = FastAPI(title="Options Pricing API")
 
-# --- GLOBAL VARIABLES ---
-LATEST_RISK_FREE_RATE = 6.50  # Fallback rate
-
 # --- 1. THE 9 AM RBI SCRAPER ---
 def fetch_rbi_rate():
     global LATEST_RISK_FREE_RATE
@@ -29,11 +26,9 @@ def fetch_rbi_rate():
             val_element = soup.select_one("#ctl00_ContentPlaceHolder1_ctl00_ctl01_Panel1 tr:nth-of-type(2) td:nth-of-type(2)")
             if val_element:
                 LATEST_RISK_FREE_RATE = float(val_element.get_text().strip())
-                print(f"Success! New Rate: {LATEST_RISK_FREE_RATE}%")
     except Exception as e:
-        print(f"Failed to fetch rate: {e}")
+        pass
 
-# Scheduler runs daily at 9:00 AM IST
 scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 scheduler.add_job(fetch_rbi_rate, 'cron', hour=9, minute=0)
 scheduler.start()
@@ -64,12 +59,10 @@ class DerivativesEngine:
         self.S = S; self.K = K; self.T = T; self.r = r; self.sigma = sigma
 
     def get_prices(self):
-        # Black-Scholes
         d1 = (np.log(self.S / self.K) + (self.r + 0.5 * self.sigma**2) * self.T) / (self.sigma * np.sqrt(self.T))
         d2 = d1 - self.sigma * np.sqrt(self.T)
         bs_call = self.S * norm.cdf(d1) - self.K * np.exp(-self.r * self.T) * norm.cdf(d2)
 
-        # Binomial (American)
         steps = 50
         dt = self.T / steps
         u = np.exp(self.sigma * np.sqrt(dt)); d = 1 / u
@@ -97,7 +90,6 @@ class DerivativesEngine:
 @app.get("/api/analyze")
 def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_expiry: int = 30, vol_model: str = "garch"):
     try:
-        # 1. Fetch Data
         stock = yf.Ticker(ticker)
         history = stock.history(period="1y")
         if history.empty: return {"status": "error", "message": "Invalid Ticker or No Data"}
@@ -106,28 +98,27 @@ def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_e
         history['Log_Ret'] = np.log(history['Close'] / history['Close'].shift(1))
         returns = history['Log_Ret'].dropna()
 
-        # 2. Select Volatility
         if vol_model == "garch": sigma = VolatilityForecaster.calc_garch(returns)
         elif vol_model == "ewma": sigma = VolatilityForecaster.calc_ewma(returns)
         else: sigma = returns.tail(60).std() * np.sqrt(252)
 
-        # 3. Define Contract Details
         Strike = round(S0 * (strike_pct / 100) / 50) * 50
         T = days_expiry / 365
         r_decimal = LATEST_RISK_FREE_RATE / 100.0
 
-        # 4. Run Pricing Engine
         engine = DerivativesEngine(S0, Strike, T, r_decimal, sigma)
         bs_price, am_price = engine.get_prices()
         greeks = engine.get_greeks()
+        
+        # New: Intrinsic vs Time Value Breakdown
+        intrinsic_val = max(0, S0 - Strike)
+        time_val = max(0, bs_price - intrinsic_val)
 
-        # 5. Asian Option (Monte Carlo) & Graph Paths
         dt = T / 100
         Z = np.random.standard_normal((50, 100))
         paths = np.hstack([np.full((50, 1), S0), S0 * np.exp(np.cumsum((r_decimal - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * Z, axis=1))])
         mc_price = np.exp(-r_decimal * T) * np.mean(np.maximum(np.mean(paths[:, 1:], axis=1) - Strike, 0))
 
-        # 6. VaR Calculation & Volatility Smile Data
         exposure = S0 * 100 
         var_param = exposure * (sigma / np.sqrt(252)) * 2.326
         var_hist = abs(exposure * np.percentile(history['Close'].pct_change().dropna(), 1))
@@ -142,14 +133,13 @@ def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_e
                 "volatility": round(sigma * 100, 2), "risk_free_rate": LATEST_RISK_FREE_RATE
             },
             "pricing": {
-                "bsm_european": round(bs_price, 2), "binomial_american": round(am_price, 2), "asian_mc": round(mc_price, 2)
+                "bsm_european": round(bs_price, 2), "binomial_american": round(am_price, 2), "asian_mc": round(mc_price, 2),
+                "intrinsic_value": round(intrinsic_val, 2), "time_value": round(time_val, 2)
             },
             "greeks": greeks,
             "risk": {"var_param": round(var_param, 2), "var_hist": round(var_hist, 2), "exposure": round(exposure, 2)},
             "charts": {
-                "mc_paths": paths.tolist(),
-                "smile_x": strikes_plot.tolist(),
-                "smile_y": (smile_vols * 100).tolist()
+                "mc_paths": paths.tolist(), "smile_x": strikes_plot.tolist(), "smile_y": (smile_vols * 100).tolist()
             }
         }
     except Exception as e:
@@ -159,5 +149,4 @@ def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_e
 def serve_frontend():
     with open("index.html", "r") as f: return f.read()
 
-# Trigger initial rate fetch on startup
 fetch_rbi_rate()
