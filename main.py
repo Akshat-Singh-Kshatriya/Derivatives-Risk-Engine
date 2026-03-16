@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from apscheduler.schedulers.background import BackgroundScheduler
 import requests
 from bs4 import BeautifulSoup
 import yfinance as yf
@@ -12,26 +11,27 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-app = FastAPI(title="Options Pricing API")
+app = FastAPI(title="TradeFlow Pricing API")
 
-# --- 1. THE 9 AM RBI SCRAPER ---
+# --- 1. LIVE YIELD SCRAPER (Strictly Live, No Fallback) ---
 def fetch_rbi_rate():
-    global LATEST_RISK_FREE_RATE
+    """Scrapes the live 10Y Bond Yield dynamically. Fails if unavailable."""
     url = "https://tradingeconomics.com/india/government-bond-yield"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.content, 'html.parser')
-            val_element = soup.select_one("#ctl00_ContentPlaceHolder1_ctl00_ctl01_Panel1 tr:nth-of-type(2) td:nth-of-type(2)")
-            if val_element:
-                LATEST_RISK_FREE_RATE = float(val_element.get_text().strip())
-    except Exception as e:
-        pass
-
-scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
-scheduler.add_job(fetch_rbi_rate, 'cron', hour=9, minute=0)
-scheduler.start()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    
+    # Using a 5-second timeout. If it takes longer, we kill the request.
+    response = requests.get(url, headers=headers, timeout=5)
+    
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        val_element = soup.select_one("#ctl00_ContentPlaceHolder1_ctl00_ctl01_Panel1 tr:nth-of-type(2) td:nth-of-type(2)")
+        if val_element:
+            return float(val_element.get_text().strip())
+            
+    # If the code reaches this point, the scrape failed. We raise a hard error.
+    raise Exception("Live risk-free rate source is currently unreachable or blocking requests.")
 
 # --- 2. QUANTITATIVE MODELS ---
 class VolatilityForecaster:
@@ -104,13 +104,16 @@ def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_e
 
         Strike = round(S0 * (strike_pct / 100) / 50) * 50
         T = days_expiry / 365
-        r_decimal = LATEST_RISK_FREE_RATE / 100.0
+        
+        # ---> STRICT LIVE RATE FETCH <---
+        # If this fails, the exception is caught below and returned to the UI.
+        live_risk_free_rate = fetch_rbi_rate()
+        r_decimal = live_risk_free_rate / 100.0
 
         engine = DerivativesEngine(S0, Strike, T, r_decimal, sigma)
         bs_price, am_price = engine.get_prices()
         greeks = engine.get_greeks()
         
-        # New: Intrinsic vs Time Value Breakdown
         intrinsic_val = max(0, S0 - Strike)
         time_val = max(0, bs_price - intrinsic_val)
 
@@ -130,7 +133,7 @@ def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_e
             "status": "success",
             "market": {
                 "ticker": ticker, "spot": round(S0, 2), "strike": Strike, 
-                "volatility": round(sigma * 100, 2), "risk_free_rate": LATEST_RISK_FREE_RATE
+                "volatility": round(sigma * 100, 2), "risk_free_rate": live_risk_free_rate
             },
             "pricing": {
                 "bsm_european": round(bs_price, 2), "binomial_american": round(am_price, 2), "asian_mc": round(mc_price, 2),
@@ -148,5 +151,3 @@ def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_e
 @app.get("/", response_class=HTMLResponse)
 def serve_frontend():
     with open("index.html", "r") as f: return f.read()
-
-fetch_rbi_rate()
