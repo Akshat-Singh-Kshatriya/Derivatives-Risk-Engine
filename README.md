@@ -37,8 +37,8 @@ Calculates fair value across different exercise styles and path dependencies:
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/yourusername/tradeflow-engine.git](https://github.com/yourusername/tradeflow-engine.git)
-   cd tradeflow-engine
+   git clone https://github.com/Akshat-Singh-Kshatriya/Derivatives-Risk-Engine
+   cd Derivatives-Risk-Engine
 2. **Install Dependencies**
    ```bash
    pip install -r requirements.txt
