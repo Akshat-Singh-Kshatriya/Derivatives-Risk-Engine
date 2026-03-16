@@ -6,107 +6,158 @@
     <title>Options Pricing Engine</title>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
-        body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #f0f2f6; color: #31333F; margin: 0; padding: 20px; }
-        .container { max-width: 1200px; margin: auto; }
+        /* Streamlit Core Variables */
+        :root {
+            --bg-color: #ffffff;
+            --sidebar-bg: #f0f2f6;
+            --text-color: #31333F;
+            --primary: #ff4b4b;
+            --border: #e6e9ef;
+            --font: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body { font-family: var(--font); color: var(--text-color); margin: 0; padding: 0; display: flex; min-height: 100vh; background: var(--bg-color); }
+        
+        /* Layout: Sidebar & Main */
+        .sidebar { width: 320px; background: var(--sidebar-bg); padding: 2rem 1.5rem; flex-shrink: 0; border-right: 1px solid var(--border); box-sizing: border-box; }
+        .main-content { flex-grow: 1; padding: 3rem 4rem; max-width: 1200px; box-sizing: border-box; overflow-y: auto; }
+        
+        h1 { font-size: 2.25rem; font-weight: 700; margin-top: 0; margin-bottom: 0.5rem; }
+        h2 { font-size: 1.5rem; font-weight: 600; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); margin-top: 2rem; }
+        h3 { font-size: 1.1rem; font-weight: 600; color: #555; }
+        
+        /* Sidebar Controls */
+        .sidebar label { display: block; font-size: 0.9rem; margin-bottom: 0.4rem; font-weight: 500; }
+        .sidebar input, .sidebar select { width: 100%; padding: 0.6rem; border: 1px solid #ccc; border-radius: 0.4rem; margin-bottom: 1.5rem; font-size: 1rem; box-sizing: border-box; background: white; }
+        .sidebar button { width: 100%; padding: 0.75rem; background: var(--primary); color: white; border: none; border-radius: 0.4rem; font-size: 1rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .sidebar button:hover { background: #e03e3e; }
+        
+        /* Streamlit Info Banners */
+        .st-info { background: #e8f4fd; color: #004280; padding: 1rem; border-radius: 0.5rem; font-size: 0.95rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 10px; }
+        .st-success { background: #d4edda; color: #155724; padding: 1rem; border-radius: 0.5rem; font-size: 0.95rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 10px; }
         
         /* Metric Cards */
-        .card { background: white; padding: 24px; border-radius: 8px; border: 1px solid #e6e9ef; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
-        .metric { border-left: 3px solid #ff4b4b; padding-left: 15px; }
-        .metric.green { border-left-color: #09ab3b; }
-        .metric.blue { border-left-color: #1f77b4; }
-        .metric label { font-size: 14px; color: #555; display: block; margin-bottom: 4px; }
-        .metric .value { font-size: 28px; font-weight: 700; color: #31333F; }
-        
-        /* Controls */
-        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; align-items: end; }
-        input, select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; margin-top: 5px; }
-        button { background: #ff4b4b; color: white; border: none; padding: 12px; font-weight: bold; border-radius: 4px; cursor: pointer; transition: 0.2s; width: 100%; font-size: 16px; }
-        button:hover { background: #e03e3e; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .metric-card { background: white; padding: 1.25rem; border-radius: 0.5rem; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .metric-label { font-size: 0.9rem; color: #555; margin-bottom: 0.25rem; }
+        .metric-value { font-size: 1.8rem; font-weight: 700; color: var(--text-color); }
+        .metric-delta { font-size: 0.85rem; color: #09ab3b; margin-top: 0.25rem; }
         
         /* Tabs */
-        .tabs { display: flex; border-bottom: 1px solid #ccc; margin-bottom: 20px; }
-        .tab { padding: 10px 20px; cursor: pointer; color: #555; border-bottom: 2px solid transparent; font-weight: 500; }
-        .tab.active { border-bottom-color: #ff4b4b; color: #31333F; }
+        .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; }
+        .tab { padding: 0.75rem 1.5rem; cursor: pointer; color: #666; font-weight: 500; border-bottom: 2px solid transparent; transition: 0.2s; }
+        .tab:hover { color: var(--text-color); }
+        .tab.active { border-bottom-color: var(--primary); color: var(--text-color); font-weight: 600; }
         .tab-content { display: none; }
-        .tab-content.active { display: block; }
+        .tab-content.active { display: block; animation: fadeIn 0.3s; }
         
-        #results { display: none; margin-top: 30px; }
-        h1 { margin: 0 0 5px 0; font-size: 32px; font-weight: 800; }
-        h3 { margin-top: 0; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        #results { display: none; }
+        
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+            .main-content { padding: 1.5rem; }
+        }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div style="margin-bottom: 30px;">
-        <h1>⚡ Options Pricing Engine</h1>
-        <p style="color: #666; margin:0;">Live RBI Yield Scraper & Volatility Forecasting</p>
+<div class="sidebar">
+    <h2 style="margin-top: 0; border: none; font-size: 1.2rem;">⚙️ Configuration</h2>
+    
+    <label>NSE Ticker</label>
+    <input type="text" id="ticker" value="DIVISLAB.NS">
+    
+    <label>Strike (% of Spot)</label>
+    <input type="number" id="strike" value="100">
+    
+    <label>Days to Expiry</label>
+    <input type="number" id="days" value="30">
+    
+    <label>Volatility Model</label>
+    <select id="vol_model">
+        <option value="garch">GARCH(1,1) Forecast</option>
+        <option value="ewma">EWMA (RiskMetrics)</option>
+        <option value="hist">Historical (60-Day)</option>
+    </select>
+    
+    <button onclick="runAnalysis()" id="calc-btn">Run Engine</button>
+    
+    <div style="margin-top: 2rem; font-size: 0.8rem; color: #888;">
+        Powered by FastAPI & Plotly.js<br>
+        Risk-Free Rate synced with RBI data daily.
     </div>
+</div>
 
-    <div class="card controls">
-        <div><label>NSE Ticker</label><input type="text" id="ticker" value="DIVISLAB.NS"></div>
-        <div><label>Strike (% of Spot)</label><input type="number" id="strike" value="100"></div>
-        <div><label>Days to Expiry</label><input type="number" id="days" value="30"></div>
-        <div>
-            <label>Volatility Model</label>
-            <select id="vol_model">
-                <option value="garch">GARCH(1,1) Forecast</option>
-                <option value="ewma">EWMA (RiskMetrics)</option>
-                <option value="hist">Historical (60-Day)</option>
-            </select>
-        </div>
-        <div><button onclick="runAnalysis()" id="calc-btn">Run Engine</button></div>
+<div class="main-content">
+    <h1>⚡ Volatix Pricing Engine</h1>
+    
+    <div class="st-info">
+        <span>ℹ️</span> 
+        <span>Configure your contract details in the sidebar and click <b>Run Engine</b> to generate the pricing models and risk metrics.</span>
     </div>
 
     <div id="results">
-        <div class="grid" style="margin-bottom: 24px;">
-            <div class="card metric"><label>Spot Price</label><div class="value">₹<span id="out-spot"></span></div></div>
-            <div class="card metric"><label>Target Strike</label><div class="value">₹<span id="out-strike"></span></div></div>
-            <div class="card metric"><label>Active Volatility</label><div class="value"><span id="out-vol"></span>%</div></div>
-            <div class="card metric"><label>Risk-Free Rate (10Y)</label><div class="value"><span id="out-rate"></span>%</div></div>
+        
+        <div class="st-success">
+            <span>🟢</span>
+            <span>Market data successfully fetched. Live Risk-Free rate is currently <b><span id="st-rate"></span>%</b>.</span>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-card"><div class="metric-label">Spot Price (<span id="out-ticker"></span>)</div><div class="metric-value">₹<span id="out-spot"></span></div></div>
+            <div class="metric-card"><div class="metric-label">Target Strike</div><div class="metric-value">₹<span id="out-strike"></span></div></div>
+            <div class="metric-card"><div class="metric-label">Active Volatility</div><div class="metric-value"><span id="out-vol"></span>%</div><div class="metric-delta">Annualized</div></div>
         </div>
 
         <div class="tabs">
             <div class="tab active" onclick="switchTab(event, 'tab-pricing')">💰 Pricing & Greeks</div>
             <div class="tab" onclick="switchTab(event, 'tab-mc')">🎲 Monte Carlo</div>
-            <div class="tab" onclick="switchTab(event, 'tab-risk')">⚠️ Risk (VaR)</div>
+            <div class="tab" onclick="switchTab(event, 'tab-risk')">⚠️ Risk Analysis</div>
         </div>
 
         <div id="tab-pricing" class="tab-content active">
-            <div class="card">
-                <h3>Valuation Models</h3>
-                <div class="grid">
-                    <div class="metric green"><label>European (BSM)</label><div class="value">₹<span id="out-bsm"></span></div></div>
-                    <div class="metric green"><label>American (Binomial)</label><div class="value">₹<span id="out-am"></span></div></div>
-                    <div class="metric green"><label>Asian (Monte Carlo)</label><div class="value">₹<span id="out-mc"></span></div></div>
-                </div>
+            <h2>Valuation Models</h2>
+            <div class="metrics-grid">
+                <div class="metric-card" style="border-top: 4px solid var(--primary);"><div class="metric-label">European (BSM)</div><div class="metric-value">₹<span id="out-bsm"></span></div></div>
+                <div class="metric-card"><div class="metric-label">American (Binomial)</div><div class="metric-value">₹<span id="out-am"></span></div></div>
+                <div class="metric-card"><div class="metric-label">Asian (Monte Carlo)</div><div class="metric-value">₹<span id="out-mc"></span></div></div>
             </div>
-            <div class="card">
-                <h3>Greeks Exposure</h3>
-                <div class="grid">
-                    <div class="metric blue"><label>Delta (Δ)</label><div class="value" id="out-delta"></div></div>
-                    <div class="metric blue"><label>Gamma (Γ)</label><div class="value" id="out-gamma"></div></div>
-                    <div class="metric blue"><label>Theta (Θ)</label><div class="value" id="out-theta"></div></div>
-                    <div class="metric blue"><label>Vega (ν)</label><div class="value" id="out-vega"></div></div>
-                </div>
+
+            <h2>Option Breakdown (Call)</h2>
+            <div class="metrics-grid" style="grid-template-columns: 1fr 1fr;">
+                <div class="metric-card"><div class="metric-label">Intrinsic Value</div><div class="metric-value" style="color:#09ab3b">₹<span id="out-intrinsic"></span></div></div>
+                <div class="metric-card"><div class="metric-label">Time Value (Extrinsic)</div><div class="metric-value" style="color:#1f77b4">₹<span id="out-timeval"></span></div></div>
+            </div>
+
+            <h2>Greeks Exposure</h2>
+            <div class="metrics-grid" style="grid-template-columns: repeat(4, 1fr);">
+                <div class="metric-card"><div class="metric-label">Delta (Δ)</div><div class="metric-value" style="font-size: 1.4rem;" id="out-delta"></div></div>
+                <div class="metric-card"><div class="metric-label">Gamma (Γ)</div><div class="metric-value" style="font-size: 1.4rem;" id="out-gamma"></div></div>
+                <div class="metric-card"><div class="metric-label">Theta (Θ)</div><div class="metric-value" style="font-size: 1.4rem;" id="out-theta"></div></div>
+                <div class="metric-card"><div class="metric-label">Vega (ν)</div><div class="metric-value" style="font-size: 1.4rem;" id="out-vega"></div></div>
             </div>
         </div>
 
         <div id="tab-mc" class="tab-content">
-            <div class="card">
-                <h3>Price Path Simulation (50 Paths)</h3>
+            <h2>Price Path Simulation</h2>
+            <div class="st-info"><span>ℹ️</span> <span>Displaying 50 geometric brownian motion paths simulated over the life of the option. The red line represents the target strike price.</span></div>
+            <div class="metric-card" style="padding: 0;">
                 <div id="mcChart" style="width:100%; height:500px;"></div>
             </div>
         </div>
 
         <div id="tab-risk" class="tab-content">
-            <div class="card">
-                <h3>Portfolio Risk Analysis</h3>
-                <div class="grid" style="margin-bottom: 20px;">
-                    <div class="metric"><label>Parametric VaR (99%)</label><div class="value">₹<span id="out-varp"></span></div></div>
-                    <div class="metric"><label>Historical VaR (99%)</label><div class="value">₹<span id="out-varh"></span></div></div>
-                </div>
+            <h2>Value at Risk (VaR)</h2>
+            <div class="metrics-grid">
+                <div class="metric-card" style="border-left: 4px solid #dc3545;"><div class="metric-label">Parametric VaR (99%)</div><div class="metric-value">₹<span id="out-varp"></span></div><div class="metric-label" style="margin-top:5px;">Estimated max loss on 1 Lot</div></div>
+                <div class="metric-card" style="border-left: 4px solid #ffc107;"><div class="metric-label">Historical VaR (99%)</div><div class="metric-value">₹<span id="out-varh"></span></div><div class="metric-label" style="margin-top:5px;">Based on actual historical drops</div></div>
+            </div>
+            
+            <h2>Volatility Smile</h2>
+            <div class="metric-card" style="padding: 0;">
                 <div id="smileChart" style="width:100%; height:400px;"></div>
             </div>
         </div>
@@ -119,12 +170,12 @@
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.getElementById(tabId).classList.add('active');
         evt.currentTarget.classList.add('active');
-        window.dispatchEvent(new Event('resize'));
+        window.dispatchEvent(new Event('resize')); // Fixes Plotly render bug in hidden divs
     }
 
     async function runAnalysis() {
         const btn = document.getElementById('calc-btn');
-        btn.innerText = "Calculating...";
+        btn.innerText = "Running Engine...";
         
         const params = new URLSearchParams({
             ticker: document.getElementById('ticker').value,
@@ -138,23 +189,29 @@
             const data = await res.json();
 
             if(data.status === "success") {
+                // Top Metrics
+                document.getElementById('out-ticker').innerText = data.market.ticker;
                 document.getElementById('out-spot').innerText = data.market.spot;
                 document.getElementById('out-strike').innerText = data.market.strike;
                 document.getElementById('out-vol').innerText = data.market.volatility;
-                document.getElementById('out-rate').innerText = data.market.risk_free_rate;
+                document.getElementById('st-rate').innerText = data.market.risk_free_rate;
 
+                // Pricing
                 document.getElementById('out-bsm').innerText = data.pricing.bsm_european;
                 document.getElementById('out-am').innerText = data.pricing.binomial_american;
                 document.getElementById('out-mc').innerText = data.pricing.asian_mc;
+                document.getElementById('out-intrinsic').innerText = data.pricing.intrinsic_value;
+                document.getElementById('out-timeval').innerText = data.pricing.time_value;
 
+                // Greeks & Risk
                 document.getElementById('out-delta').innerText = data.greeks.Delta;
                 document.getElementById('out-gamma').innerText = data.greeks.Gamma;
                 document.getElementById('out-theta').innerText = data.greeks.Theta;
                 document.getElementById('out-vega').innerText = data.greeks.Vega;
-
                 document.getElementById('out-varp').innerText = data.risk.var_param;
                 document.getElementById('out-varh').innerText = data.risk.var_hist;
 
+                // Render MC Chart
                 const mcTraces = data.charts.mc_paths.map(path => ({
                     y: path, type: 'scatter', mode: 'lines',
                     line: { width: 1, color: '#1f77b4' }, opacity: 0.3, showlegend: false
@@ -163,10 +220,11 @@
                     y: Array(100).fill(data.market.strike), type: 'scatter', mode: 'lines',
                     line: { dash: 'dash', color: 'red', width: 2 }, name: 'Strike'
                 });
-                Plotly.newPlot('mcChart', mcTraces, { margin: { t: 20, b: 40, l: 40, r: 20 }, xaxis: { title: 'Time Steps' }, yaxis: { title: 'Simulated Price' }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)' });
+                Plotly.newPlot('mcChart', mcTraces, { margin: { t: 30, b: 40, l: 40, r: 20 }, xaxis: { title: 'Time Steps' }, yaxis: { title: 'Simulated Price' }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)' });
 
+                // Render Smile Chart
                 const smileTrace = { x: data.charts.smile_x, y: data.charts.smile_y, type: 'scatter', mode: 'lines+markers', line: { color: 'purple', width: 2 }, marker: { size: 6 } };
-                Plotly.newPlot('smileChart', [smileTrace], { title: 'Volatility Smile Approximation', margin: { t: 40, b: 40, l: 40, r: 20 }, xaxis: { title: 'Strike Price' }, yaxis: { title: 'Implied Volatility (%)' }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', shapes: [{ type: 'line', x0: data.market.spot, x1: data.market.spot, y0: 0, y1: 1, yref: 'paper', line: { color: 'black', dash: 'dash', width: 1 } }], annotations: [{ x: data.market.spot, y: 1.05, yref: 'paper', text: 'ATM', showarrow: false }] });
+                Plotly.newPlot('smileChart', [smileTrace], { margin: { t: 30, b: 40, l: 40, r: 20 }, xaxis: { title: 'Strike Price' }, yaxis: { title: 'Implied Volatility (%)' }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', shapes: [{ type: 'line', x0: data.market.spot, x1: data.market.spot, y0: 0, y1: 1, yref: 'paper', line: { color: 'black', dash: 'dash', width: 1 } }], annotations: [{ x: data.market.spot, y: 1.05, yref: 'paper', text: 'ATM', showarrow: false }] });
 
                 document.getElementById('results').style.display = 'block';
             } else {
