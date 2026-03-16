@@ -1,6 +1,5 @@
 fastapi
 uvicorn
-apscheduler
 requests
 beautifulsoup4
 yfinance
