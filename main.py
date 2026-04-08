@@ -6,35 +6,45 @@ import pandas as pd
 from scipy.stats import norm
 from arch import arch_model
 import warnings
+import math
 
 warnings.filterwarnings('ignore')
 
 app = FastAPI(title="TradeFlow Pricing API")
 
-# --- 1. LIVE YIELD API (No HTML Scraping) ---
+# --- 1. LIVE YIELD API (With Fallback) ---
 def fetch_live_risk_free_rate():
     """
     Uses the US 10-Year Treasury Yield (^TNX) and adds the US-India 
-    Sovereign Spread to dynamically calculate the Indian Risk-Free Rate 
-    without getting blocked by Cloudflare.
+    Sovereign Spread. Includes a fallback if Yahoo blocks the server.
     """
     try:
-        # Fetch live US 10-Year Yield via Yahoo Finance
         tnx = yf.Ticker("^TNX")
-        us_10y_yield = tnx.history(period="1d")['Close'].iloc[-1]
+        hist = tnx.history(period="1d")
         
-        # The yield spread between US and India 10Y bonds is typically ~2.50%
+        # Check if Yahoo returned empty data (often happens on cloud deployments)
+        if hist.empty or hist['Close'].isnull().all():
+            return 7.0  # Fallback to standard 7.00% Indian RFR
+            
+        us_10y_yield = hist['Close'].dropna().iloc[-1]
+        
+        # If the fetched yield is somehow NaN, use fallback
+        if math.isnan(us_10y_yield):
+            return 7.0
+            
         india_spread = 2.50 
         india_10y_yield = us_10y_yield + india_spread
         
         return float(round(india_10y_yield, 2))
-    except Exception as e:
-        raise Exception(f"Failed to fetch live bond yields from Yahoo Finance API. {e}")
+    except Exception:
+        # Failsafe return if network completely fails
+        return 7.0
 
 # --- 2. QUANTITATIVE MODELS ---
 class VolatilityForecaster:
     @staticmethod
     def calc_ewma(returns, lambda_param=0.94):
+        if returns.empty: return 0.20 # Fallback
         variances = np.zeros_like(returns)
         variances[0] = np.var(returns)
         for i in range(1, len(returns)):
@@ -44,12 +54,14 @@ class VolatilityForecaster:
     @staticmethod
     def calc_garch(returns):
         try:
+            if returns.empty: return 0.20 # Fallback
             scaled_returns = returns.dropna() * 100 
             am = arch_model(scaled_returns, vol='Garch', p=1, q=1, dist='normal')
             res = am.fit(disp='off')
             next_day_var = res.forecast(horizon=1).variance.iloc[-1, 0]
             return np.sqrt(next_day_var / 10000) * np.sqrt(252)
         except:
+            # Fallback to historical standard deviation if GARCH fails to converge
             return returns.std() * np.sqrt(252)
 
 class DerivativesEngine:
@@ -90,20 +102,37 @@ def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_e
     try:
         stock = yf.Ticker(ticker)
         history = stock.history(period="1y")
-        if history.empty: return {"status": "error", "message": "Invalid Ticker or No Data"}
         
-        S0 = float(history['Close'].iloc[-1])
+        # 1. STRICT DATA VALIDATION: Check if data is completely empty
+        if history.empty or history['Close'].dropna().empty: 
+            return {"status": "error", "message": f"No valid price data found for {ticker}."}
+        
+        # 2. SAFE S0 EXTRACTION: Drop NaNs before grabbing the last price
+        valid_closes = history['Close'].dropna()
+        S0 = float(valid_closes.iloc[-1])
+        
+        if math.isnan(S0):
+            return {"status": "error", "message": "Spot price (S0) resolved to NaN."}
+
         history['Log_Ret'] = np.log(history['Close'] / history['Close'].shift(1))
         returns = history['Log_Ret'].dropna()
+
+        # Check if we have enough return data for volatility modeling
+        if returns.empty or len(returns) < 5:
+             return {"status": "error", "message": "Insufficient historical data to calculate volatility."}
 
         if vol_model == "garch": sigma = VolatilityForecaster.calc_garch(returns)
         elif vol_model == "ewma": sigma = VolatilityForecaster.calc_ewma(returns)
         else: sigma = returns.tail(60).std() * np.sqrt(252)
 
+        # 3. VOLATILITY SANITATION: Ensure sigma is a valid positive number
+        if math.isnan(sigma) or math.isinf(sigma) or sigma <= 0:
+            sigma = 0.20  # Safe default to 20% volatility
+
+        # 4. SAFE STRIKE ROUNDING
         Strike = round(S0 * (strike_pct / 100) / 50) * 50
         T = days_expiry / 365
         
-        # ---> STRICT LIVE RATE FETCH (VIA API NOW) <---
         live_risk_free_rate = fetch_live_risk_free_rate()
         r_decimal = live_risk_free_rate / 100.0
 
@@ -121,11 +150,18 @@ def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_e
 
         exposure = S0 * 100 
         var_param = exposure * (sigma / np.sqrt(252)) * 2.326
-        var_hist = abs(exposure * np.percentile(history['Close'].pct_change().dropna(), 1))
+        
+        # 5. SAFE HISTORICAL VAR: Ensure there's data for percentiles
+        pct_changes = history['Close'].pct_change().dropna()
+        if not pct_changes.empty:
+            var_hist = abs(exposure * np.percentile(pct_changes, 1))
+        else:
+            var_hist = 0.0
         
         strikes_plot = np.linspace(S0*0.8, S0*1.2, 20)
         smile_vols = sigma + 0.5 * ((strikes_plot - S0)/S0)**2
 
+        # 6. NaN CLEANUP FOR JSON SERIALIZATION: Replace any stray NaNs before returning
         return {
             "status": "success",
             "market": {
@@ -133,18 +169,26 @@ def analyze_stock(ticker: str = "DIVISLAB.NS", strike_pct: float = 100.0, days_e
                 "volatility": round(sigma * 100, 2), "risk_free_rate": live_risk_free_rate
             },
             "pricing": {
-                "bsm_european": round(bs_price, 2), "binomial_american": round(am_price, 2), "asian_mc": round(mc_price, 2),
+                "bsm_european": round(bs_price, 2) if not math.isnan(bs_price) else 0.0, 
+                "binomial_american": round(am_price, 2) if not math.isnan(am_price) else 0.0, 
+                "asian_mc": round(mc_price, 2) if not math.isnan(mc_price) else 0.0,
                 "intrinsic_value": round(intrinsic_val, 2), "time_value": round(time_val, 2)
             },
             "greeks": greeks,
             "risk": {"var_param": round(var_param, 2), "var_hist": round(var_hist, 2), "exposure": round(exposure, 2)},
             "charts": {
-                "mc_paths": paths.tolist(), "smile_x": strikes_plot.tolist(), "smile_y": (smile_vols * 100).tolist()
+                "mc_paths": np.nan_to_num(paths).tolist(), 
+                "smile_x": np.nan_to_num(strikes_plot).tolist(), 
+                "smile_y": np.nan_to_num(smile_vols * 100).tolist()
             }
         }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": f"Server encountered an error: {str(e)}"}
 
 @app.get("/", response_class=HTMLResponse)
 def serve_frontend():
-    with open("index.html", "r") as f: return f.read()
+    try:
+        with open("index.html", "r") as f: 
+            return f.read()
+    except FileNotFoundError:
+        return "<h1>Error: index.html not found</h1>"
